@@ -7,6 +7,8 @@ import { CartProvider } from "@/context/CartContext";
 import { WishlistProvider } from "@/context/WishlistContext";
 import { CurrencyProvider } from "@/context/CurrencyContext";
 import { Toaster } from "react-hot-toast";
+import { ServiceWorkerRegistration } from "@/components/pwa/ServiceWorkerRegistration";
+import { InstallPrompt } from "@/components/pwa/InstallPrompt";
 
 const inter = Inter({
   variable: "--font-inter",
@@ -23,15 +25,25 @@ export const metadata: Metadata = {
   authors: [{ name: "Princewill World" }],
   creator: "Princewill World",
   publisher: "Princewill World",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "PrincewillWorld",
+  },
+  formatDetection: {
+    telephone: false,
+  },
   icons: {
     icon: [
-      { url: "/favicon.ico", sizes: "any" },
-      { url: "/logo-small.png", type: "image/png" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512x512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
-      { url: "/logo-small.png", type: "image/png" },
+      { url: "/icons/icon-152x152.png", sizes: "152x152", type: "image/png" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
     ],
-    shortcut: "/favicon.ico",
+    shortcut: "/logo-small.png",
   },
   openGraph: {
     type: "website",
@@ -76,6 +88,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        <meta name="application-name" content="PrincewillWorld" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="PrincewillWorld" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="theme-color" content="#8C0000" />
+        <link rel="apple-touch-icon" href="/icons/icon-152x152.png" />
+      </head>
       <body
         className={`${inter.variable} font-sans antialiased`}
       >
@@ -92,6 +113,8 @@ export default function RootLayout({
                   border: '1px solid #333',
                 },
               }} />
+              <ServiceWorkerRegistration />
+              <InstallPrompt />
             </CartProvider>
           </WishlistProvider>
         </CurrencyProvider>
