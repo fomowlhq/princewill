@@ -6,8 +6,7 @@ import {
   Twitter,
   Instagram,
   CreditCard,
-  ShieldCheck,
-  Smartphone
+  ShieldCheck
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api-client";
@@ -128,18 +127,7 @@ export default function Footer() {
                   </Link>
                 </li>
               ))}
-              <li>
-                <a
-                  href="https://expo.dev/accounts/vinworlds-organization/projects/princewill/builds/c42c4154-01b3-4af4-97c3-eb7b174a5d5b"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm hover:text-white transition-colors inline-flex items-center gap-2"
-                >
-                  <Smartphone className="w-4 h-4" />
-                  Download Android App
-                </a>
-              </li>
-            </ul>
+                          </ul>
           </div>
         </div>
 
