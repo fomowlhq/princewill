@@ -46,7 +46,7 @@ export default function Hero() {
             subtitle: banner.subtitle || "",
             description: "",
             buttonText: banner.button_text || "Shop Now",
-            buttonLink: banner.link || "/shop",
+            buttonLink: banner.banner_url || "/shop",
             image: getImageUrl(banner.images),
             is_subtitle: banner.is_subtitle,
             is_button: banner.is_button
