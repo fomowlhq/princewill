@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useState, Suspense, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { apiClient } from "@/lib/api-client";
-import { Loader2, CheckCircle, XCircle } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import Link from "next/link";
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 2000; // 2 seconds
 
 function PaymentCallbackContent() {
   const searchParams = useSearchParams();
@@ -12,48 +15,92 @@ function PaymentCallbackContent() {
   const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
   const [message, setMessage] = useState("");
   const [invoiceNo, setInvoiceNo] = useState("");
+  const [retryCount, setRetryCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
+  const verificationAttempted = useRef(false);
+
+  const verifyPayment = useCallback(async (paymentRef: string, attempt: number = 1): Promise<boolean> => {
+    try {
+      const response = await apiClient("/verify-payment", {
+        method: "POST",
+        body: JSON.stringify({ reference: paymentRef }),
+      });
+
+      if (response.success) {
+        setStatus("success");
+        setMessage("Payment verified successfully!");
+        setInvoiceNo(response.data?.invoice_no || "");
+
+        // Clear cart and affiliate code from localStorage
+        localStorage.removeItem("princewill_cart");
+        localStorage.removeItem("affiliate_code");
+        sessionStorage.removeItem("pending_payment_ref");
+        window.dispatchEvent(new CustomEvent("cart-updated"));
+        return true;
+      } else {
+        // If it's a temporary error and we haven't exhausted retries
+        if (attempt < MAX_RETRIES && response.status >= 500) {
+          setRetryCount(attempt);
+          await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+          return verifyPayment(paymentRef, attempt + 1);
+        }
+
+        setStatus("error");
+        setMessage(response.message || "Payment verification failed. Please contact support if payment was deducted.");
+        return false;
+      }
+    } catch (error) {
+      console.error("Payment verification error:", error);
+
+      // Retry on network errors
+      if (attempt < MAX_RETRIES) {
+        setRetryCount(attempt);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+        return verifyPayment(paymentRef, attempt + 1);
+      }
+
+      setStatus("error");
+      setMessage("Network error while verifying payment. Please check your connection and try again.");
+      return false;
+    }
+  }, []);
 
   useEffect(() => {
+    // Prevent double verification
+    if (verificationAttempted.current) return;
+    verificationAttempted.current = true;
+
     const reference = searchParams.get("reference");
     const trxref = searchParams.get("trxref");
-
     const paymentRef = reference || trxref;
 
     if (!paymentRef) {
-      setStatus("error");
-      setMessage("No payment reference found");
+      // Try to recover from sessionStorage
+      const pendingRef = sessionStorage.getItem("pending_payment_ref");
+      if (pendingRef) {
+        verifyPayment(pendingRef);
+      } else {
+        setStatus("error");
+        setMessage("No payment reference found. If you completed a payment, please contact support.");
+      }
       return;
     }
 
-    const verifyPayment = async () => {
-      try {
-        const response = await apiClient("/verify-payment", {
-          method: "POST",
-          body: JSON.stringify({ reference: paymentRef }),
-        });
+    verifyPayment(paymentRef);
+  }, [searchParams, verifyPayment]);
 
-        if (response.success) {
-          setStatus("success");
-          setMessage("Payment verified successfully!");
-          setInvoiceNo(response.data?.invoice_no || "");
+  const handleManualRetry = async () => {
+    const reference = searchParams.get("reference") || searchParams.get("trxref");
+    if (!reference) return;
 
-          // Clear cart and affiliate code from localStorage
-          localStorage.removeItem("princewill_cart");
-          localStorage.removeItem("affiliate_code");
-          window.dispatchEvent(new CustomEvent("cart-updated"));
-        } else {
-          setStatus("error");
-          setMessage(response.message || "Payment verification failed");
-        }
-      } catch (error) {
-        console.error("Payment verification error:", error);
-        setStatus("error");
-        setMessage("An error occurred while verifying payment");
-      }
-    };
+    setIsRetrying(true);
+    setStatus("loading");
+    setRetryCount(0);
+    verificationAttempted.current = false;
 
-    verifyPayment();
-  }, [searchParams]);
+    await verifyPayment(reference);
+    setIsRetrying(false);
+  };
 
   return (
     <div className="bg-white rounded-lg p-8 shadow-lg max-w-md w-full text-center">
@@ -62,6 +109,11 @@ function PaymentCallbackContent() {
           <Loader2 className="w-16 h-16 animate-spin text-[#8C0000] mx-auto mb-4" />
           <h2 className="text-2xl font-semibold text-[#27231F] mb-2">Verifying Payment</h2>
           <p className="text-gray-600">Please wait while we verify your payment...</p>
+          {retryCount > 0 && (
+            <p className="text-sm text-gray-500 mt-2">
+              Retry attempt {retryCount} of {MAX_RETRIES}...
+            </p>
+          )}
         </>
       )}
 
@@ -95,14 +147,26 @@ function PaymentCallbackContent() {
       {status === "error" && (
         <>
           <XCircle className="w-16 h-16 text-red-500 mx-auto mb-4" />
-          <h2 className="text-2xl font-semibold text-red-600 mb-2">Payment Failed</h2>
+          <h2 className="text-2xl font-semibold text-red-600 mb-2">Verification Failed</h2>
           <p className="text-gray-600 mb-6">{message}</p>
           <div className="space-y-3">
-            <Link
-              href="/checkout"
-              className="block w-full bg-[#8C0000] text-white py-3 rounded-lg font-semibold hover:bg-black transition-colors"
+            <button
+              onClick={handleManualRetry}
+              disabled={isRetrying}
+              className="flex items-center justify-center gap-2 w-full bg-[#8C0000] text-white py-3 rounded-lg font-semibold hover:bg-black transition-colors disabled:opacity-50"
             >
-              Try Again
+              {isRetrying ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-5 h-5" />
+              )}
+              {isRetrying ? "Retrying..." : "Retry Verification"}
+            </button>
+            <Link
+              href="/account/orders"
+              className="block w-full border border-[#8C0000] text-[#8C0000] py-3 rounded-lg font-semibold hover:bg-[#8C0000] hover:text-white transition-colors"
+            >
+              Check My Orders
             </Link>
             <Link
               href="/"
@@ -111,6 +175,9 @@ function PaymentCallbackContent() {
               Return Home
             </Link>
           </div>
+          <p className="text-xs text-gray-400 mt-4">
+            Reference: {searchParams.get("reference") || searchParams.get("trxref") || "N/A"}
+          </p>
         </>
       )}
     </div>
