@@ -125,6 +125,7 @@ export default function CheckoutPage() {
   const [showCryptoModal, setShowCryptoModal] = useState(false);
   const [exchangeRate, setExchangeRate] = useState(1);
   const [copied, setCopied] = useState(false);
+  const [cryptoTimer, setCryptoTimer] = useState(3600); // 60 minutes in seconds
 
   // Payment method
   const [paymentMethod, setPaymentMethod] = useState<"paystack" | "crypto">("paystack");
@@ -253,6 +254,33 @@ export default function CheckoutPage() {
     fetchShipping();
   }, [selectedCityId, shippingMethod]);
 
+  // Crypto timer countdown
+  useEffect(() => {
+    if (!showCryptoModal) {
+      setCryptoTimer(3600); // Reset timer when modal closes
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setCryptoTimer(prev => {
+        if (prev <= 1) {
+          setShowCryptoModal(false);
+          setOrderError("Payment session expired. Please try again.");
+          return 3600;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [showCryptoModal]);
+
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const handleAddressSelect = (addrId: number) => {
     const addr = addresses.find(a => a.id === addrId);
     if (addr) {
@@ -364,10 +392,32 @@ export default function CheckoutPage() {
   };
 
   const handlePaystackPayment = async () => {
+    // Prevent double-clicks
+    if (isProcessing) return;
+
     setIsProcessing(true);
     setOrderError("");
 
     try {
+      // Step 1: Validate stock before proceeding
+      const stockValidation = await apiClient('/validate-stock', {
+        method: 'POST',
+        body: JSON.stringify({
+          cart_items: cartItems.map(item => ({
+            product_id: item.productId,
+            quantity: item.qty,
+          }))
+        }),
+      });
+
+      if (!stockValidation.success) {
+        const errorDetails = stockValidation.details || stockValidation.message || "Some items are no longer available";
+        setOrderError(errorDetails);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Step 2: Initialize payment
       const affiliateCode = localStorage.getItem("affiliate_code");
 
       const paymentData = {
@@ -405,6 +455,8 @@ export default function CheckoutPage() {
       });
 
       if (response.success && response.data?.authorization_url) {
+        // Store reference for potential recovery
+        sessionStorage.setItem('pending_payment_ref', response.data.reference);
         // Redirect to Paystack payment page
         window.location.href = response.data.authorization_url;
       } else {
@@ -412,24 +464,42 @@ export default function CheckoutPage() {
       }
     } catch (error) {
       console.error("Payment error:", error);
-      setOrderError("An error occurred while initializing payment");
+      setOrderError("An error occurred while initializing payment. Please try again.");
     } finally {
       setIsProcessing(false);
     }
   };
 
   const handleCryptoPayment = async () => {
-    if (!selectedCrypto) return;
+    if (!selectedCrypto || isProcessing) return;
 
     setIsProcessing(true);
     setOrderError("");
 
-    // Save address if requested
-    if (saveAddress && showNewAddressForm) {
-      await handleSaveAddress();
-    }
-
     try {
+      // Step 1: Validate stock before proceeding
+      const stockValidation = await apiClient('/validate-stock', {
+        method: 'POST',
+        body: JSON.stringify({
+          cart_items: cartItems.map(item => ({
+            product_id: item.productId,
+            quantity: item.qty,
+          }))
+        }),
+      });
+
+      if (!stockValidation.success) {
+        const errorDetails = stockValidation.details || stockValidation.message || "Some items are no longer available";
+        setOrderError(errorDetails);
+        setIsProcessing(false);
+        return;
+      }
+
+      // Save address if requested
+      if (saveAddress && showNewAddressForm) {
+        await handleSaveAddress();
+      }
+
       const affiliateCode = localStorage.getItem("affiliate_code");
 
       const orderData = {
@@ -472,13 +542,12 @@ export default function CheckoutPage() {
         setShowCryptoModal(false);
         // Set flag to prevent redirect to cart when cart is cleared
         setIsOrderPlaced(true);
-        // Clear affiliate code after successful order
+        // Clear affiliate code and cart
         localStorage.removeItem("affiliate_code");
-        // Redirect to success page FIRST, then clear cart after redirect starts
+        clearCart();
+        // Redirect to success page
         const invoiceNo = response.data.invoice_no;
         router.push(`/order-success?invoice=${invoiceNo}&method=crypto`);
-        // Clear cart after small delay to ensure redirect happens first
-        setTimeout(() => clearCart(), 100);
       } else {
         setOrderError(response.message || "Failed to place order");
       }
@@ -1076,7 +1145,9 @@ export default function CheckoutPage() {
 
             <div className="mt-4 text-center">
               <span className="text-[#6C655D]">Note: This address is valid for </span>
-              <span className="text-[#FFAE0D]">59:59</span>
+              <span className={`font-mono ${cryptoTimer < 300 ? 'text-red-500' : 'text-[#FFAE0D]'}`}>
+                {formatTimer(cryptoTimer)}
+              </span>
             </div>
           </div>
         </div>
